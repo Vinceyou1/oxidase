@@ -4,22 +4,22 @@ pub mod op;
 use serde::Deserialize;
 
 use super::service::Service;
-use r#match::RewriteMatch;
-use op::RewriteOp;
+use r#match::RouterMatch;
+use op::RouterOp;
 
 #[derive(Debug, Deserialize, Clone)]
-pub struct RewriteService {
-    pub rules: Vec<RewriteRule>,
+pub struct RouterService {
+    pub rules: Vec<RouterRule>,
     pub next: Box<Service>,
     #[serde(default)]
     pub max_steps: Option<u32>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
-pub struct RewriteRule {
-    pub when: RewriteMatch,
+pub struct RouterRule {
+    pub when: RouterMatch,
     #[serde(default)]
-    pub ops: Vec<RewriteOp>,
+    pub ops: Vec<RouterOp>,
     #[serde(default)]
     pub on_match: OnMatch,
 }

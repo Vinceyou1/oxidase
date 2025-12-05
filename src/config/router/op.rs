@@ -2,9 +2,10 @@ use serde::{Deserialize, Deserializer};
 use std::collections::BTreeMap;
 
 use super::super::url_scheme::Scheme;
+use super::super::service::Service;
 
 #[derive(Debug, Clone)]
-pub enum RewriteOp {
+pub enum RouterOp {
     Branch(BranchOp),
 
     SetScheme(Scheme),
@@ -25,6 +26,8 @@ pub enum RewriteOp {
     InternalRewrite,
     Redirect { status: RedirectCode, location: String },
     Respond { status: u16, body: Option<String>, headers: BTreeMap<String, String> },
+
+    Use(Box<Service>),
 }
 
 #[derive(Debug, Deserialize, Clone, Copy)]
@@ -33,13 +36,13 @@ pub enum RedirectCode { _301=301, _302=302, _307=307, _308=308 }
 #[derive(Debug, Deserialize, Clone)]
 pub struct BranchOp {
     pub r#if: CondNode,
-    pub then: Vec<RewriteOp>,
-    pub r#else: Vec<RewriteOp>,
+    pub then: Vec<RouterOp>,
+    pub r#else: Vec<RouterOp>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
-enum RewriteOpFull {
+enum RouterOpFull {
     Branch(BranchOp),
 
     SetScheme(Scheme),
@@ -64,11 +67,13 @@ enum RewriteOpFull {
         #[serde(default)] body: Option<String>,
         #[serde(default)] headers: BTreeMap<String, String>,
     },
+
+    Use(Box<Service>),
 }
 
 #[derive(Debug, Deserialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
-enum RewriteOpUnitKeyword {
+enum RouterOpUnitKeyword {
     HeaderClear,
     QueryClear,
     InternalRewrite,
@@ -76,38 +81,39 @@ enum RewriteOpUnitKeyword {
 
 #[derive(Deserialize)]
 #[serde(untagged)]
-enum RewriteOpDe {
-    Unit(RewriteOpUnitKeyword),
-    Full(RewriteOpFull),
+enum RouterOpDe {
+    Unit(RouterOpUnitKeyword),
+    Full(RouterOpFull),
 }
 
-impl<'de> Deserialize<'de> for RewriteOp {
+impl<'de> Deserialize<'de> for RouterOp {
     fn deserialize<D: Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
-        Ok(match RewriteOpDe::deserialize(de)? {
-            RewriteOpDe::Unit(u) => match u {
-                RewriteOpUnitKeyword::HeaderClear => RewriteOp::HeaderClear,
-                RewriteOpUnitKeyword::QueryClear => RewriteOp::QueryClear,
-                RewriteOpUnitKeyword::InternalRewrite => RewriteOp::InternalRewrite,
+        Ok(match RouterOpDe::deserialize(de)? {
+            RouterOpDe::Unit(u) => match u {
+                RouterOpUnitKeyword::HeaderClear => RouterOp::HeaderClear,
+                RouterOpUnitKeyword::QueryClear => RouterOp::QueryClear,
+                RouterOpUnitKeyword::InternalRewrite => RouterOp::InternalRewrite,
             },
-            RewriteOpDe::Full(f) => match f {
-                RewriteOpFull::Branch(x) => RewriteOp::Branch(x),
-                RewriteOpFull::SetScheme(x) => RewriteOp::SetScheme(x),
-                RewriteOpFull::SetHost(x) => RewriteOp::SetHost(x),
-                RewriteOpFull::SetPort(x) => RewriteOp::SetPort(x),
-                RewriteOpFull::SetPath(x) => RewriteOp::SetPath(x),
-                RewriteOpFull::HeaderSet(x) => RewriteOp::HeaderSet(x),
-                RewriteOpFull::HeaderAdd(x) => RewriteOp::HeaderAdd(x),
-                RewriteOpFull::QuerySet(x) => RewriteOp::QuerySet(x),
-                RewriteOpFull::QueryAdd(x) => RewriteOp::QueryAdd(x),
-                RewriteOpFull::HeaderDelete(x) => RewriteOp::HeaderDelete(x),
-                RewriteOpFull::QueryDelete(x) => RewriteOp::QueryDelete(x),
-                RewriteOpFull::HeaderClear => RewriteOp::HeaderClear,
-                RewriteOpFull::QueryClear => RewriteOp::QueryClear,
-                RewriteOpFull::InternalRewrite => RewriteOp::InternalRewrite,
-                RewriteOpFull::Redirect { status, location } =>
-                    RewriteOp::Redirect { status, location },
-                RewriteOpFull::Respond { status, body, headers } =>
-                    RewriteOp::Respond { status, body, headers },
+            RouterOpDe::Full(f) => match f {
+                RouterOpFull::Branch(x) => RouterOp::Branch(x),
+                RouterOpFull::SetScheme(x) => RouterOp::SetScheme(x),
+                RouterOpFull::SetHost(x) => RouterOp::SetHost(x),
+                RouterOpFull::SetPort(x) => RouterOp::SetPort(x),
+                RouterOpFull::SetPath(x) => RouterOp::SetPath(x),
+                RouterOpFull::HeaderSet(x) => RouterOp::HeaderSet(x),
+                RouterOpFull::HeaderAdd(x) => RouterOp::HeaderAdd(x),
+                RouterOpFull::QuerySet(x) => RouterOp::QuerySet(x),
+                RouterOpFull::QueryAdd(x) => RouterOp::QueryAdd(x),
+                RouterOpFull::HeaderDelete(x) => RouterOp::HeaderDelete(x),
+                RouterOpFull::QueryDelete(x) => RouterOp::QueryDelete(x),
+                RouterOpFull::HeaderClear => RouterOp::HeaderClear,
+                RouterOpFull::QueryClear => RouterOp::QueryClear,
+                RouterOpFull::InternalRewrite => RouterOp::InternalRewrite,
+                RouterOpFull::Redirect { status, location } =>
+                    RouterOp::Redirect { status, location },
+                RouterOpFull::Respond { status, body, headers } =>
+                    RouterOp::Respond { status, body, headers },
+                RouterOpFull::Use(svc) => RouterOp::Use(svc),
             },
         })
     }

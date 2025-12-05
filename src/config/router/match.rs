@@ -3,7 +3,7 @@ use serde::Deserialize;
 use super::super::http_method::HttpMethod;
 
 #[derive(Debug, Deserialize, Clone, Default)]
-pub struct RewriteMatch {
+pub struct RouterMatch {
     pub host: Option<String>,
     pub path: Option<String>,
     #[serde(default)]
