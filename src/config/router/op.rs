@@ -37,6 +37,7 @@ pub enum RedirectCode { _301=301, _302=302, _307=307, _308=308 }
 pub struct BranchOp {
     pub r#if: CondNode,
     pub then: Vec<RouterOp>,
+    #[serde(default)]
     pub r#else: Vec<RouterOp>,
 }
 
