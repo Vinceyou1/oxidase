@@ -1,14 +1,17 @@
 pub mod service;
 pub mod router;
+pub mod http_server;
 
+pub use http_server::{
+    BuiltHttpServer,
+    build_http_server,
+};
 pub use service::{
     LoadedService,
     LoadedStatic,
     LoadedForward,
     LoadedRouter,
-    BuiltHttpServer,
     build_service,
-    build_http_server,
 };
 pub use router::{
     LoadedRule,
@@ -16,5 +19,9 @@ pub use router::{
     CompiledHeaderCond,
     CompiledQueryCond,
     CompiledCookieCond,
+    LoadedOp,
+    CompiledCondNode,
+    CompiledBasicCond,
+    CompiledTestCond,
     compile_rules,
 };

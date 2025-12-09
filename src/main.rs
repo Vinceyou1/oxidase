@@ -4,7 +4,7 @@ mod handler;
 mod http_server;
 
 use config::http_server::HttpServer;
-use build::service::build_http_server;
+use build::build_http_server;
 
 #[tokio::main]
 async fn main() {
