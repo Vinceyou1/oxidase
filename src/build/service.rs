@@ -4,6 +4,10 @@ use crate::config::http_server::HttpServer;
 use crate::config::router::RouterService;
 use crate::config::service::Service;
 use crate::config::r#static::StaticService;
+use crate::build::router::{
+    LoadedRule,
+    compile_rules,
+};
 
 const DEFAULT_MAX_STEPS: u32 = 16;
 
@@ -26,7 +30,7 @@ pub struct LoadedForward {
 
 #[derive(Debug, Clone)]
 pub struct LoadedRouter {
-    pub rules: Vec<crate::config::router::RouterRule>,
+    pub rules: Vec<LoadedRule>,
     pub next: Box<LoadedService>,
     pub max_steps: u32,
 }
@@ -60,11 +64,7 @@ fn build_router(rt: &RouterService) -> Result<LoadedService, ConfigError> {
     let next = build_service(&rt.next)?;
     let max_steps = rt.max_steps.unwrap_or(DEFAULT_MAX_STEPS);
 
-    // TODO: compile matchers/templates once available.
-    let mut rules = Vec::new();
-    for r in &rt.rules {
-        rules.push(r.clone());
-    }
+    let rules = compile_rules(&rt.rules)?;
 
     Ok(LoadedService::Router(LoadedRouter {
         rules,
