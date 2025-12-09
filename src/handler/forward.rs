@@ -8,6 +8,7 @@ use crate::build::service::LoadedForward;
 use crate::config::forward::{PassHost, PassHostMode};
 use crate::config::url_scheme::Scheme;
 use crate::handler::{BoxResponseFuture, ServiceHandler};
+use crate::util::http::make_error_resp;
 
 pub type ForwardResult<T> = Result<T, String>;
 
@@ -176,12 +177,6 @@ fn copy_headers(
             );
         }
     }
-}
-
-fn make_error_resp(status: http::StatusCode, msg: &str) -> http::Response<Full<Bytes>> {
-    let mut resp = http::Response::new(Full::new(Bytes::from(msg.to_string())));
-    *resp.status_mut() = status;
-    resp
 }
 
 /// Drop default ports for http/https when formatting host header.

@@ -6,10 +6,10 @@ use crate::config::router::op::RouterOp;
 #[test]
 fn compile_simple_rule() {
     let rule = RouterRule {
-        when: RouterMatch {
+        when: Some(RouterMatch {
             host: Some("example.com".into()),
             ..RouterMatch::default()
-        },
+        }),
         ops: vec![RouterOp::SetHost("upstream".into())],
         on_match: OnMatch::default(),
     };

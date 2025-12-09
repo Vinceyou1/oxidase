@@ -19,6 +19,7 @@ use crate::config::router::r#match::{
 };
 use crate::config::router::{OnMatch, RouterRule};
 use crate::config::url_scheme::Scheme;
+use crate::template::{CompiledTemplate, compile_template};
 
 #[derive(Debug, Clone)]
 pub struct LoadedRule {
@@ -63,20 +64,20 @@ pub struct CompiledCookieCond {
 pub enum LoadedOp {
     Branch(CompiledCondNode, Vec<LoadedOp>, Vec<LoadedOp>),
     SetScheme(Scheme),
-    SetHost(String),
+    SetHost(CompiledTemplate),
     SetPort(u16),
-    SetPath(String),
-    HeaderSet(BTreeMap<String, String>),
-    HeaderAdd(BTreeMap<String, String>),
+    SetPath(CompiledTemplate),
+    HeaderSet(BTreeMap<String, CompiledTemplate>),
+    HeaderAdd(BTreeMap<String, CompiledTemplate>),
     HeaderDelete(Vec<String>),
     HeaderClear,
-    QuerySet(BTreeMap<String, String>),
-    QueryAdd(BTreeMap<String, String>),
+    QuerySet(BTreeMap<String, CompiledTemplate>),
+    QueryAdd(BTreeMap<String, CompiledTemplate>),
     QueryDelete(Vec<String>),
     QueryClear,
     InternalRewrite,
-    Redirect { status: crate::config::router::op::RedirectCode, location: String },
-    Respond { status: u16, body: Option<String>, headers: BTreeMap<String, String> },
+    Redirect { status: crate::config::router::op::RedirectCode, location: CompiledTemplate },
+    Respond { status: u16, body: Option<CompiledTemplate>, headers: BTreeMap<String, CompiledTemplate> },
     Use(Box<LoadedService>),
 }
 
@@ -108,7 +109,7 @@ pub fn compile_rules(rules: &[RouterRule]) -> Result<Vec<LoadedRule>, ConfigErro
 
 fn compile_rule(rule: &RouterRule) -> Result<LoadedRule, ConfigError> {
     Ok(LoadedRule {
-        when: compile_match(&rule.when)?,
+        when: compile_match(rule.when.as_ref().unwrap_or(&RouterMatch::default()))?,
         ops: compile_ops(&rule.ops)?,
         on_match: rule.on_match.clone(),
     })
@@ -179,20 +180,55 @@ fn compile_op(op: &RouterOp) -> Result<LoadedOp, ConfigError> {
             LoadedOp::Branch(cond, then_ops, else_ops)
         }
         RouterOp::SetScheme(s) => LoadedOp::SetScheme(*s),
-        RouterOp::SetHost(h) => LoadedOp::SetHost(h.clone()),
+        RouterOp::SetHost(h) => LoadedOp::SetHost(compile_template(h).map_err(to_config_err)?),
         RouterOp::SetPort(p) => LoadedOp::SetPort(*p),
-        RouterOp::SetPath(p) => LoadedOp::SetPath(p.clone()),
-        RouterOp::HeaderSet(m) => LoadedOp::HeaderSet(m.clone()),
-        RouterOp::HeaderAdd(m) => LoadedOp::HeaderAdd(m.clone()),
+        RouterOp::SetPath(p) => LoadedOp::SetPath(compile_template(p).map_err(to_config_err)?),
+        RouterOp::HeaderSet(m) => {
+            let mut compiled = BTreeMap::new();
+            for (k, v) in m {
+                compiled.insert(k.clone(), compile_template(v).map_err(to_config_err)?);
+            }
+            LoadedOp::HeaderSet(compiled)
+        }
+        RouterOp::HeaderAdd(m) => {
+            let mut compiled = BTreeMap::new();
+            for (k, v) in m {
+                compiled.insert(k.clone(), compile_template(v).map_err(to_config_err)?);
+            }
+            LoadedOp::HeaderAdd(compiled)
+        }
         RouterOp::HeaderDelete(v) => LoadedOp::HeaderDelete(v.clone()),
         RouterOp::HeaderClear => LoadedOp::HeaderClear,
-        RouterOp::QuerySet(m) => LoadedOp::QuerySet(m.clone()),
-        RouterOp::QueryAdd(m) => LoadedOp::QueryAdd(m.clone()),
+        RouterOp::QuerySet(m) => {
+            let mut compiled = BTreeMap::new();
+            for (k, v) in m {
+                compiled.insert(k.clone(), compile_template(v).map_err(to_config_err)?);
+            }
+            LoadedOp::QuerySet(compiled)
+        }
+        RouterOp::QueryAdd(m) => {
+            let mut compiled = BTreeMap::new();
+            for (k, v) in m {
+                compiled.insert(k.clone(), compile_template(v).map_err(to_config_err)?);
+            }
+            LoadedOp::QueryAdd(compiled)
+        }
         RouterOp::QueryDelete(v) => LoadedOp::QueryDelete(v.clone()),
         RouterOp::QueryClear => LoadedOp::QueryClear,
         RouterOp::InternalRewrite => LoadedOp::InternalRewrite,
-        RouterOp::Redirect { status, location } => LoadedOp::Redirect { status: *status, location: location.clone() },
-        RouterOp::Respond { status, body, headers } => LoadedOp::Respond { status: *status, body: body.clone(), headers: headers.clone() },
+        RouterOp::Redirect { status, location } =>
+            LoadedOp::Redirect { status: *status, location: compile_template(location).map_err(to_config_err)? },
+        RouterOp::Respond { status, body, headers } => {
+            let compiled_body = match body {
+                Some(b) => Some(compile_template(b).map_err(to_config_err)?),
+                None => None,
+            };
+            let mut compiled_headers = BTreeMap::new();
+            for (k, v) in headers {
+                compiled_headers.insert(k.clone(), compile_template(v).map_err(to_config_err)?);
+            }
+            LoadedOp::Respond { status: *status, body: compiled_body, headers: compiled_headers }
+        }
         RouterOp::Use(svc) => {
             let built = crate::build::service::build_service(svc)?;
             LoadedOp::Use(Box::new(built))

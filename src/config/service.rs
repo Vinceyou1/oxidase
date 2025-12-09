@@ -27,7 +27,9 @@ pub fn validate_service(svc: &Service) -> Result<(), ConfigError> {
             if rt.rules.is_empty() {
                 return Err(ConfigError::Invalid("`router.rules` cannot be empty".into()));
             }
-            validate_service(&rt.next)?;
+            if let Some(n) = &rt.next {
+                validate_service(n)?;
+            }
         }
         Service::Forward(fw) => {
             if fw.target.host.trim().is_empty() {

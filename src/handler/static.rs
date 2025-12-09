@@ -13,6 +13,7 @@ use crate::config::r#static::{
     IndexStrategy,
 };
 use crate::handler::{BoxResponseFuture, ServiceHandler};
+use crate::util::http::make_error_resp;
 
 impl ServiceHandler for LoadedStatic {
     fn handle_request<'a>(
@@ -28,7 +29,7 @@ impl ServiceHandler for LoadedStatic {
 
             let rel = match url_path_to_relative(url_path_raw) {
                 Ok(p) => p,
-                Err(msg) => return bad_request(msg),
+                Err(msg) => return make_error_resp(http::StatusCode::BAD_REQUEST, msg),
             };
 
             let base_dir_path = Path::new(&self.config.source_dir);
@@ -245,11 +246,4 @@ fn location_cur_dir(req: &http::Request<body::Incoming>) -> String {
         location.push_str(query);
     }
     location
-}
-
-fn bad_request(msg: &'static str) -> http::Response<Full<Bytes>> {
-    let mut resp
-        = http::Response::new(Full::new(Bytes::from_static(msg.as_bytes())));
-    *resp.status_mut() = http::StatusCode::BAD_REQUEST;
-    resp
 }

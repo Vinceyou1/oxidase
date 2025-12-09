@@ -30,7 +30,7 @@ pub struct LoadedForward {
 #[derive(Debug, Clone)]
 pub struct LoadedRouter {
     pub rules: Vec<LoadedRule>,
-    pub next: Box<LoadedService>,
+    pub next: Option<Box<LoadedService>>,
     pub max_steps: u32,
 }
 
@@ -43,14 +43,17 @@ pub fn build_service(cfg: &Service) -> Result<LoadedService, ConfigError> {
 }
 
 fn build_router(rt: &RouterService) -> Result<LoadedService, ConfigError> {
-    let next = build_service(&rt.next)?;
+    let next = match &rt.next {
+        Some(n) => Some(Box::new(build_service(n)?)),
+        None => None,
+    };
     let max_steps = rt.max_steps.unwrap_or(DEFAULT_MAX_STEPS);
 
     let rules = compile_rules(&rt.rules)?;
 
     Ok(LoadedService::Router(LoadedRouter {
         rules,
-        next: Box::new(next),
+        next,
         max_steps,
     }))
 }

@@ -10,14 +10,16 @@ use op::RouterOp;
 #[derive(Debug, Deserialize, Clone)]
 pub struct RouterService {
     pub rules: Vec<RouterRule>,
-    pub next: Box<Service>,
+    #[serde(default)]
+    pub next: Option<Box<Service>>,
     #[serde(default)]
     pub max_steps: Option<u32>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct RouterRule {
-    pub when: RouterMatch,
+    #[serde(default)]
+    pub when: Option<RouterMatch>,
     #[serde(default)]
     pub ops: Vec<RouterOp>,
     #[serde(default)]

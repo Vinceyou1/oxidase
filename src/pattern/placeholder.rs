@@ -1,5 +1,6 @@
 use super::context::PatternContext;
 use super::PatternError;
+use crate::util::parse::parse_call;
 
 /// Built-in placeholder types (parse-time)
 #[derive(Debug, Clone)]
@@ -45,31 +46,16 @@ pub fn parse_type_spec<C: PatternContext>(s: &str, ctx: &C) -> Result<TypeSpec, 
         "segment" => Segment, "slug" => Slug, "uint" => Uint, "int" => Int, "hex" => Hex, "alnum" => Alnum,
         "uuid" => Uuid, "path" => Path, "label" => Label, "labels" => Labels, "any" => Any,
         _ => {
-            if let Some(arg) = parse_arg(s, "regex") { Regex(arg) }
-            else if let Some(arg) = parse_arg(s, "regex_path") { RegexPath(arg) }
-            else if let Some(arg) = parse_arg(s, "regex_labels") { RegexLabels(arg) }
-            else { return Err(PatternError::BadPlaceholder(s.into())); }
+            if let Ok((name, args)) = parse_call(s) {
+                match (name.as_str(), args.as_slice()) {
+                    ("regex", [arg]) => Regex(arg.clone()),
+                    ("regex_path", [arg]) => RegexPath(arg.clone()),
+                    ("regex_labels", [arg]) => RegexLabels(arg.clone()),
+                    _ => return Err(PatternError::BadPlaceholder(s.into())),
+                }
+            } else {
+                return Err(PatternError::BadPlaceholder(s.into()));
+            }
         }
     })
-}
-
-/// Parse fname("..."), with \" and \\ inside.
-pub fn parse_arg(s: &str, fname: &str) -> Option<String> {
-    let head = format!("{fname}(");
-    if !s.starts_with(&head) || !s.ends_with(')') { return None; }
-    
-    let inner = &s[head.len()..s.len()-1];
-    if !inner.starts_with('"') || !inner.ends_with('"') { return None; }
-
-    let inner = &inner[1..inner.len()-1];
-    let mut out = String::new();
-    let mut esc = false;
-
-    for ch in inner.chars() {
-        if esc { out.push(ch); esc = false; }
-        else if ch == '\\' { esc = true; }
-        else { out.push(ch); }
-    }
-
-    Some(out)
 }

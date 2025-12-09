@@ -17,6 +17,8 @@ use crate::config::http_method::HttpMethod;
 use crate::config::router::OnMatch;
 use crate::config::url_scheme::Scheme;
 use crate::handler::{BoxResponseFuture, ServiceHandler};
+use crate::template::{ValueProvider, expand_template};
+use crate::util::http::make_error_resp;
 
 #[derive(Debug, Clone)]
 struct RouterCtx {
@@ -29,6 +31,31 @@ struct RouterCtx {
     headers: HashMap<String, Vec<String>>,
     cookies: HashMap<String, String>,
     captures: HashMap<String, String>,
+}
+
+impl ValueProvider for RouterCtx {
+    fn get(&self, key: &str) -> Option<String> {
+        match key {
+            "method" => self.method.as_ref().map(|m| format!("{:?}", m).to_ascii_uppercase()),
+            "scheme" => self.scheme.clone(),
+            "host" => Some(self.host.clone()),
+            "port" => self.port.map(|p| p.to_string()),
+            "path" => Some(self.path.clone()),
+            v if v.starts_with("header.") => {
+                let name = v.trim_start_matches("header.").to_ascii_lowercase();
+                self.headers.get(&name).and_then(|vals| vals.get(0)).cloned()
+            }
+            v if v.starts_with("query.") => {
+                let k = v.trim_start_matches("query.");
+                self.query.get(k).and_then(|vals| vals.get(0)).cloned()
+            }
+            v if v.starts_with("cookie.") => {
+                let k = v.trim_start_matches("cookie.");
+                self.cookies.get(k).cloned()
+            }
+            _ => self.captures.get(key).cloned(),
+        }
+    }
 }
 
 impl RouterCtx {
@@ -73,12 +100,16 @@ async fn route_request(
 
     loop {
         if step >= router.max_steps {
-            return make_error(http::StatusCode::LOOP_DETECTED, "router steps exceeded");
+            return make_error_resp(http::StatusCode::LOOP_DETECTED, "router steps exceeded");
         }
 
         if idx >= router.rules.len() {
-            apply_ctx_to_request(&ctx, req);
-            return router.next.handle_request(req).await;
+            if let Some(nx) = &router.next {
+                apply_ctx_to_request(&ctx, req);
+                return nx.handle_request(req).await;
+            } else {
+                return make_error_resp(http::StatusCode::NOT_FOUND, "no route matched");
+            }
         }
 
         let rule = &router.rules[idx];
@@ -104,8 +135,12 @@ async fn route_request(
             OpOutcome::Fallthrough => {
                 match rule.on_match {
                     OnMatch::Stop => {
-                        apply_ctx_to_request(&ctx, req);
-                        return router.next.handle_request(req).await;
+                        if let Some(n) = &router.next {
+                            apply_ctx_to_request(&ctx, req);
+                            return n.handle_request(req).await;
+                        } else {
+                            return make_error_resp(http::StatusCode::NOT_FOUND, "no route matched");
+                        }
                     }
                     OnMatch::Continue => idx += 1,
                     OnMatch::Restart => {
@@ -236,35 +271,52 @@ async fn run_ops(
                         Scheme::Https => "https".to_string(),
                     });
                 }
-                LoadedOp::SetHost(h) => ctx.host = h.clone(),
-                LoadedOp::SetPort(p) => ctx.port = Some(*p),
-                LoadedOp::SetPath(p) => {
-                    if !p.starts_with('/') {
-                        return OpOutcome::Respond(make_error(http::StatusCode::BAD_REQUEST, "path must start with '/'"));
+                LoadedOp::SetHost(tpl) => {
+                    match expand_template(tpl, &ctx) {
+                        Ok(val) => ctx.host = val,
+                        Err(_) => return OpOutcome::Respond(make_error_resp(http::StatusCode::BAD_REQUEST, "template error")),
                     }
-                    ctx.path = p.clone();
+                }
+                LoadedOp::SetPort(p) => ctx.port = Some(*p),
+                LoadedOp::SetPath(tpl) => {
+                        let val = match expand_template(tpl, &ctx) {
+                        Ok(v) => v,
+                        Err(_) => return OpOutcome::Respond(make_error_resp(http::StatusCode::BAD_REQUEST, "template error")),
+                    };
+                    if !val.starts_with('/') {
+                        return OpOutcome::Respond(make_error_resp(http::StatusCode::BAD_REQUEST, "path must start with '/'"));
+                    }
+                    ctx.path = val;
                 }
                 LoadedOp::HeaderSet(map) => {
                     let headers = req.headers_mut();
                     for (k, v) in map {
-                        if let (Ok(name), Ok(val)) = (
+                        let val = match expand_template(v, &ctx) {
+                            Ok(v) => v,
+                            Err(_) => return OpOutcome::Respond(make_error_resp(http::StatusCode::BAD_REQUEST, "template error")),
+                        };
+                        if let (Ok(name), Ok(hv)) = (
                             http::HeaderName::try_from(k.as_str()),
-                            http::HeaderValue::from_str(v),
+                            http::HeaderValue::from_str(&val),
                         ) {
-                            headers.insert(name.clone(), val.clone());
-                            ctx.headers.insert(name.as_str().to_ascii_lowercase(), vec![v.clone()]);
+                            headers.insert(name.clone(), hv);
+                            ctx.headers.insert(name.as_str().to_ascii_lowercase(), vec![val]);
                         }
                     }
                 }
                 LoadedOp::HeaderAdd(map) => {
                     let headers = req.headers_mut();
                     for (k, v) in map {
-                        if let (Ok(name), Ok(val)) = (
+                        let val = match expand_template(v, &ctx) {
+                            Ok(v) => v,
+                            Err(_) => return OpOutcome::Respond(make_error_resp(http::StatusCode::BAD_REQUEST, "template error")),
+                        };
+                        if let (Ok(name), Ok(hv)) = (
                             http::HeaderName::try_from(k.as_str()),
-                            http::HeaderValue::from_str(v),
+                            http::HeaderValue::from_str(&val),
                         ) {
-                            headers.append(name.clone(), val.clone());
-                            ctx.headers.entry(name.as_str().to_ascii_lowercase()).or_default().push(v.clone());
+                            headers.append(name.clone(), hv);
+                            ctx.headers.entry(name.as_str().to_ascii_lowercase()).or_default().push(val);
                         }
                     }
                 }
@@ -283,12 +335,20 @@ async fn run_ops(
                 }
                 LoadedOp::QuerySet(map) => {
                     for (k, v) in map {
-                        ctx.query.insert(k.clone(), vec![v.clone()]);
+                        let val = match expand_template(v, &ctx) {
+                            Ok(v) => v,
+                            Err(_) => return OpOutcome::Respond(make_error_resp(http::StatusCode::BAD_REQUEST, "template error")),
+                        };
+                        ctx.query.insert(k.clone(), vec![val]);
                     }
                 }
                 LoadedOp::QueryAdd(map) => {
                     for (k, v) in map {
-                        ctx.query.entry(k.clone()).or_default().push(v.clone());
+                        let val = match expand_template(v, &ctx) {
+                            Ok(v) => v,
+                            Err(_) => return OpOutcome::Respond(make_error_resp(http::StatusCode::BAD_REQUEST, "template error")),
+                        };
+                        ctx.query.entry(k.clone()).or_default().push(val);
                     }
                 }
                 LoadedOp::QueryDelete(keys) => {
@@ -305,26 +365,41 @@ async fn run_ops(
                         crate::config::router::op::RedirectCode::_307 => http::StatusCode::TEMPORARY_REDIRECT,
                         crate::config::router::op::RedirectCode::_308 => http::StatusCode::PERMANENT_REDIRECT,
                     };
+                    let loc = match expand_template(location, &ctx) {
+                        Ok(v) => v,
+                        Err(_) => return OpOutcome::Respond(make_error_resp(http::StatusCode::BAD_REQUEST, "template error")),
+                    };
                     let resp = http::Response::builder()
                         .status(status_code)
-                        .header(http::header::LOCATION, location.as_str())
+                        .header(http::header::LOCATION, loc.as_str())
                         .body(Full::default())
-                        .unwrap_or_else(|_| make_error(http::StatusCode::INTERNAL_SERVER_ERROR, "redirect build failed"));
+                        .unwrap_or_else(|_| make_error_resp(http::StatusCode::INTERNAL_SERVER_ERROR, "redirect build failed"));
                     return OpOutcome::Respond(resp);
                 }
                 LoadedOp::Respond { status, body, headers } => {
                     let mut builder = http::Response::builder().status(*status);
                     for (k, v) in headers {
+                        let val = match expand_template(v, &ctx) {
+                            Ok(v) => v,
+                            Err(_) => return OpOutcome::Respond(make_error_resp(http::StatusCode::BAD_REQUEST, "template error")),
+                        };
                         if let (Ok(name), Ok(val)) = (
                             http::HeaderName::try_from(k.as_str()),
-                            http::HeaderValue::from_str(v),
+                            http::HeaderValue::from_str(&val),
                         ) {
                             builder = builder.header(name, val);
                         }
                     }
+                    let body_val = match body {
+                        Some(t) => match expand_template(t, &ctx) {
+                            Ok(v) => v,
+                            Err(_) => return OpOutcome::Respond(make_error_resp(http::StatusCode::BAD_REQUEST, "template error")),
+                        },
+                        None => String::new(),
+                    };
                     let resp = builder
-                        .body(Full::from(body.clone().unwrap_or_default()))
-                        .unwrap_or_else(|_| make_error(http::StatusCode::INTERNAL_SERVER_ERROR, "respond build failed"));
+                        .body(Full::from(body_val))
+                        .unwrap_or_else(|_| make_error_resp(http::StatusCode::INTERNAL_SERVER_ERROR, "respond build failed"));
                     return OpOutcome::Respond(resp);
                 }
                 LoadedOp::Use(svc) => {
@@ -479,12 +554,6 @@ fn parse_cookies(cookies: Option<&Vec<String>>) -> HashMap<String, String> {
         }
     }
     out
-}
-
-fn make_error(status: http::StatusCode, msg: &str) -> http::Response<Full<Bytes>> {
-    let mut resp = http::Response::new(Full::from(msg.to_string()));
-    *resp.status_mut() = status;
-    resp
 }
 
 impl TryFrom<&str> for HttpMethod {
