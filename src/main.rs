@@ -2,6 +2,7 @@ mod build;
 mod config;
 mod handler;
 mod http_server;
+mod pattern;
 
 use config::http_server::HttpServer;
 use build::build_http_server;

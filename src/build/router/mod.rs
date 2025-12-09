@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use crate::build::service::LoadedService;
 use crate::config::error::ConfigError;
 use crate::config::http_method::HttpMethod;
-use crate::config::pattern::{
+use crate::pattern::{
     compile_host,
     compile_path,
     compile_value,
@@ -161,7 +161,7 @@ fn compile_opt_pattern<F>(
     f: F,
 ) -> Result<Option<CompiledPattern>, ConfigError>
 where
-    F: Fn(&str) -> Result<CompiledPattern, crate::config::pattern::error::PatternError>,
+    F: Fn(&str) -> Result<CompiledPattern, crate::pattern::error::PatternError>,
 {
     input.map(|s| f(s).map_err(to_config_err)).transpose()
 }
