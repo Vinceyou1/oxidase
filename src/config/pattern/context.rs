@@ -5,8 +5,8 @@ use super::PatternError;
 /// and whether that expansion is tail-only (i.e., nothing may follow).
 pub trait PatternContext {
     fn expand(&self, ty: &TypeSpec, is_last_after: bool) -> Result<Expand, PatternError>;
-    fn default_type(&self) -> TypeSpec;
-    fn asterisk_type(&self) -> TypeSpec;
+    fn default_type(&self) -> TypeSpec; // <var> or <var:>
+    fn asterisk_type(&self) -> TypeSpec; // <var:*>
 }
 
 #[derive(Debug, Clone)]
@@ -20,10 +20,12 @@ pub struct Expand {
 #[derive(Debug, Clone, Copy)] pub struct ValueCtx;
 
 const RE_SLUG: &str = "[A-Za-z0-9_-]+";
-const RE_INT: &str = "\\d+";
+const RE_UINT: &str = "\\d+";
+const RE_INT: &str = "-?\\d+";
 const RE_HEX: &str = "[0-9a-fA-F]+";
 const RE_ALNUM: &str = "[A-Za-z0-9]+";
 const RE_UUID: &str = "[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}";
+const RE_LABEL: &str = "[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?";
 
 impl PatternContext for PathCtx {
     fn expand(&self, ty: &TypeSpec, _is_last_after: bool) -> Result<Expand, PatternError> {
@@ -31,6 +33,7 @@ impl PatternContext for PathCtx {
         Ok(match ty {
             Segment => re("[^/]+"),
             Slug    => re(RE_SLUG),
+            Uint    => re(RE_UINT),
             Int     => re(RE_INT),
             Hex     => re(RE_HEX),
             Alnum   => re(RE_ALNUM),
@@ -49,14 +52,15 @@ impl PatternContext for HostCtx {
     fn expand(&self, ty: &TypeSpec, _is_last_after: bool) -> Result<Expand, PatternError> {
         use TypeSpec::*;
         Ok(match ty {
-            Segment => re("[^.]+"),
+            Segment => re(RE_LABEL),
             Slug    => re(RE_SLUG),
+            Uint    => re(RE_UINT),
             Int     => re(RE_INT),
             Hex     => re(RE_HEX),
             Alnum   => re(RE_ALNUM),
             Uuid    => re(RE_UUID),
-            Label   => re("[a-z0-9-]+"),
-            Labels  => re("(?:[a-z0-9-]+(?:\\.[a-z0-9-]+)*)"),
+            Label   => re(RE_LABEL),
+            Labels  => re(&format!("(?:{0}(?:\\.{0})*)", RE_LABEL)),
             Regex(s) => re_group(s),
             RegexLabels(s) => re_group(s),
             _ => return Err(PatternError::BadTypeForCtx(name_of(ty))),
@@ -73,6 +77,7 @@ impl PatternContext for ValueCtx {
             Segment => re(if is_last_after { ".+" } else { ".+?" }),
             Any     => re(if is_last_after { ".*" } else { ".*?" }),
             Slug    => re(RE_SLUG),
+            Uint    => re(RE_UINT),
             Int     => re(RE_INT),
             Hex     => re(RE_HEX),
             Alnum   => re(RE_ALNUM),
@@ -95,6 +100,7 @@ fn name_of(ty: &TypeSpec) -> &'static str {
     match ty {
         Segment => "segment",
         Slug => "slug",
+        Uint => "uint",
         Int => "int",
         Hex => "hex",
         Alnum => "alnum",

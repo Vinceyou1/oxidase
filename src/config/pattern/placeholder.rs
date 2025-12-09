@@ -6,7 +6,7 @@ use super::PatternError;
 pub enum TypeSpec {
     Segment,                 // segment (changes by ctx)
     Slug,                    // [A-Za-z0-9_-]+
-    Int, Hex, Alnum, Uuid,
+    Uint, Int, Hex, Alnum, Uuid,
     Path,                    // PathCtx only, tail-only
     Label, Labels,           // HostCtx only
     Any,                     // ValueCtx only
@@ -42,7 +42,7 @@ pub fn parse_type_spec<C: PatternContext>(s: &str, ctx: &C) -> Result<TypeSpec, 
 
     Ok(match s {
         "" => ctx.default_type(), "*" => ctx.asterisk_type(),
-        "segment" => Segment, "slug" => Slug, "int" => Int, "hex" => Hex, "alnum" => Alnum,
+        "segment" => Segment, "slug" => Slug, "uint" => Uint, "int" => Int, "hex" => Hex, "alnum" => Alnum,
         "uuid" => Uuid, "path" => Path, "label" => Label, "labels" => Labels, "any" => Any,
         _ => {
             if let Some(arg) = parse_arg(s, "regex") { Regex(arg) }
