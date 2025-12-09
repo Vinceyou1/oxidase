@@ -12,80 +12,82 @@ use crate::config::r#static::{
     IndexStrategy,
     StaticService,
 };
-use crate::handler::ServiceHandler;
+use crate::handler::{BoxResponseFuture, ServiceHandler};
 
 impl ServiceHandler for StaticService {
-    fn handle_request(
-        &self,
-        req: &mut http::Request<body::Incoming>,
-    ) -> http::Response<Full<Bytes>> {
-        let head_only = req.method() == &http::Method::HEAD;
+    fn handle_request<'a>(
+        &'a self,
+        req: &'a mut http::Request<body::Incoming>,
+    ) -> BoxResponseFuture<'a> {
+        Box::pin(async move {
+            let head_only = req.method() == &http::Method::HEAD;
 
-        let url_path_raw = req.uri().path();
-        let is_url_path_dir = url_path_raw.ends_with('/');
-        eprintln!("Requested path: {} (is dir: {})", url_path_raw, is_url_path_dir);
+            let url_path_raw = req.uri().path();
+            let is_url_path_dir = url_path_raw.ends_with('/');
+            eprintln!("Requested path: {} (is dir: {})", url_path_raw, is_url_path_dir);
 
-        let rel = match url_path_to_relative(url_path_raw) {
-            Ok(p) => p,
-            Err(msg) => return bad_request(msg),
-        };
+            let rel = match url_path_to_relative(url_path_raw) {
+                Ok(p) => p,
+                Err(msg) => return bad_request(msg),
+            };
 
-        let base_dir_path = Path::new(&self.source_dir);
-        let target_path = base_dir_path.join(&rel);
-        let is_target_dir = is_existing_dir(&target_path);
-        let is_target_index =
-            !is_url_path_dir
-            && target_path.file_name().map_or(false, |f| f == self.file_index.as_str());
+            let base_dir_path = Path::new(&self.source_dir);
+            let target_path = base_dir_path.join(&rel);
+            let is_target_dir = is_existing_dir(&target_path);
+            let is_target_index =
+                !is_url_path_dir
+                && target_path.file_name().map_or(false, |f| f == self.file_index.as_str());
 
-        eprintln!("Mapped to path: {:?} (is dir: {}, is index: {})", target_path, is_target_dir, is_target_index);
+            eprintln!("Mapped to path: {:?} (is dir: {}, is index: {})", target_path, is_target_dir, is_target_index);
 
-        if is_target_index {
-            match &self.index_strategy {
-                IndexStrategy::Redirect { code } =>
-                    return redirect_to(&location_cur_dir(req), *code),
-                IndexStrategy::NotFound =>
-                    return nearest_404(base_dir_path, &target_path, &self.file_404, head_only),
-                IndexStrategy::ServeIndex => {},
-            }
-        }
-
-        let target_file_path = if is_url_path_dir {
-            target_path.join(&self.file_index)
-        } else {
-            target_path.clone()
-        };
-
-        eprintln!("Mapped to file: {:?}", target_file_path);
-
-        if let Ok(body) = std::fs::read(&target_file_path) {
-            eprintln!("Serving file: {:?}", target_file_path);
-            return with_ct(hyper::http::StatusCode::OK, &target_file_path, body, head_only);
-        }
-
-        if is_target_dir && !is_url_path_dir {
-            let index_file_path = target_path.join(&self.file_index);
-            let has_index_file = index_file_path.is_file();
-
-            return if has_index_file {
-                match &self.evil_dir_strategy.if_index_exists {
-                    EvilDirStrategyIndexExists::ServeIndex =>
-                        serve_file_or_404(base_dir_path, &index_file_path, &self.file_404, head_only),
-                    EvilDirStrategyIndexExists::Redirect { code } =>
-                        redirect_to(&location_with_slash(req), *code),
-                    EvilDirStrategyIndexExists::NotFound =>
-                        nearest_404(base_dir_path, &target_path, &self.file_404, head_only),
+            if is_target_index {
+                match &self.index_strategy {
+                    IndexStrategy::Redirect { code } =>
+                        return redirect_to(&location_cur_dir(req), *code),
+                    IndexStrategy::NotFound =>
+                        return nearest_404(base_dir_path, &target_path, &self.file_404, head_only),
+                    IndexStrategy::ServeIndex => {},
                 }
+            }
+
+            let target_file_path = if is_url_path_dir {
+                target_path.join(&self.file_index)
             } else {
-                match &self.evil_dir_strategy.if_index_missing {
-                    EvilDirStrategyIndexMissing::Redirect { code } =>
-                        redirect_to(&location_with_slash(req), *code),
-                    EvilDirStrategyIndexMissing::NotFound =>
-                        nearest_404(base_dir_path, &target_path, &self.file_404, head_only),
+                target_path.clone()
+            };
+
+            eprintln!("Mapped to file: {:?}", target_file_path);
+
+            if let Ok(body) = std::fs::read(&target_file_path) {
+                eprintln!("Serving file: {:?}", target_file_path);
+                return with_ct(hyper::http::StatusCode::OK, &target_file_path, body, head_only);
+            }
+
+            if is_target_dir && !is_url_path_dir {
+                let index_file_path = target_path.join(&self.file_index);
+                let has_index_file = index_file_path.is_file();
+
+                return if has_index_file {
+                    match &self.evil_dir_strategy.if_index_exists {
+                        EvilDirStrategyIndexExists::ServeIndex =>
+                            serve_file_or_404(base_dir_path, &index_file_path, &self.file_404, head_only),
+                        EvilDirStrategyIndexExists::Redirect { code } =>
+                            redirect_to(&location_with_slash(req), *code),
+                        EvilDirStrategyIndexExists::NotFound =>
+                            nearest_404(base_dir_path, &target_path, &self.file_404, head_only),
+                    }
+                } else {
+                    match &self.evil_dir_strategy.if_index_missing {
+                        EvilDirStrategyIndexMissing::Redirect { code } =>
+                            redirect_to(&location_with_slash(req), *code),
+                        EvilDirStrategyIndexMissing::NotFound =>
+                            nearest_404(base_dir_path, &target_path, &self.file_404, head_only),
+                    }
                 }
             }
-        }
 
-        nearest_404(base_dir_path, &target_file_path, &self.file_404, head_only)
+            nearest_404(base_dir_path, &target_file_path, &self.file_404, head_only)
+        })
     }
 }
 

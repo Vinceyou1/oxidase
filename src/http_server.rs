@@ -44,7 +44,8 @@ pub async fn start_server(hs: HttpServer) {
                         let ox_svc = ox_svc_conn.clone();
                         async move {
                             if req.version() == Version::HTTP_11 {
-                                Ok::<_, hyper::Error>(ox_svc.handle_request(&mut req))
+                                let resp = ox_svc.handle_request(&mut req).await;
+                                Ok::<_, hyper::Error>(resp)
                             } else {
                                 Ok(Response::builder()
                                     .status(400)

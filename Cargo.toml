@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 hyper = { version = "1", features = ["full"] }
-hyper-util = { version = "0.1", features = ["tokio"] }
+hyper-util = { version = "0.1", features = ["tokio", "client", "client-legacy", "http1"] }
 bytes = "1"
 http-body-util = "0.1"
 percent-encoding = "2"
