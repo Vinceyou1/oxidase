@@ -1,6 +1,7 @@
 use bytes::Bytes;
 use http_body_util::Full;
 use hyper::{body, http};
+use std::collections::HashMap;
 
 use crate::build::router::{
     CompiledBasicCond,
@@ -178,7 +179,10 @@ pub async fn run_ops(
                     return OpOutcome::UseService(resp);
                 }
                 LoadedOp::Branch(cond, then_ops, else_ops) => {
-                    let pass = eval_cond(cond, ctx);
+                    let (pass, captures) = eval_cond(cond, ctx);
+                    if pass {
+                        ctx.captures.extend(captures);
+                    }
                     let ops_to_run = if pass { then_ops } else { else_ops };
                     stack.push((ops_slice, idx + 1));
                     stack.push((ops_to_run, 0));
@@ -192,29 +196,59 @@ pub async fn run_ops(
     OpOutcome::Fallthrough
 }
 
-fn eval_cond(node: &CompiledCondNode, ctx: &RouterCtx) -> bool {
+/// Evaluate a condition tree, returning (is_true, captures_from_true_path).
+pub(crate) fn eval_cond(node: &CompiledCondNode, ctx: &RouterCtx) -> (bool, HashMap<String, String>) {
     match node {
-        CompiledCondNode::All(children) => children.iter().all(|n| eval_cond(n, ctx)),
-        CompiledCondNode::Any(children) => children.iter().any(|n| eval_cond(n, ctx)),
-        CompiledCondNode::Not(child) => !eval_cond(child, ctx),
+        CompiledCondNode::All(children) => {
+            let mut acc = HashMap::new();
+            for child in children {
+                let (pass, caps) = eval_cond(child, ctx);
+                if !pass {
+                    return (false, HashMap::new());
+                }
+                acc.extend(caps);
+            }
+            (true, acc)
+        }
+        CompiledCondNode::Any(children) => {
+            for child in children {
+                let (pass, caps) = eval_cond(child, ctx);
+                if pass {
+                    return (true, caps);
+                }
+            }
+            (false, HashMap::new())
+        }
+        CompiledCondNode::Not(child) => {
+            let (pass, _) = eval_cond(child, ctx);
+            (!pass, HashMap::new())
+        }
         CompiledCondNode::Test(t) => eval_test(t, ctx),
     }
 }
 
-fn eval_test(t: &CompiledTestCond, ctx: &RouterCtx) -> bool {
+fn eval_test(t: &CompiledTestCond, ctx: &RouterCtx) -> (bool, HashMap<String, String>) {
     match &t.cond {
         CompiledBasicCond::Equals(is) => {
-            value_of(&t.var, ctx).map_or(false, |v| serde_yaml::Value::String(v) == *is)
+            let pass = value_of(&t.var, ctx).map_or(false, |v| serde_yaml::Value::String(v) == *is);
+            (pass, HashMap::new())
         }
         CompiledBasicCond::In(list) => {
-            value_of(&t.var, ctx).map_or(false, |v| list.contains(&serde_yaml::Value::String(v)))
+            let pass = value_of(&t.var, ctx).map_or(false, |v| list.contains(&serde_yaml::Value::String(v)));
+            (pass, HashMap::new())
         }
         CompiledBasicCond::Present(p) => {
             let has = value_of(&t.var, ctx).is_some();
-            has == *p
+            (has == *p, HashMap::new())
         }
         CompiledBasicCond::Pattern(pat) => {
-            value_of(&t.var, ctx).map_or(false, |v| pat.is_match(&v))
+            if let Some(v) = value_of(&t.var, ctx) {
+                if pat.is_match(&v) {
+                    let caps = pat.captures_map(&v).unwrap_or_default();
+                    return (true, caps);
+                }
+            }
+            (false, HashMap::new())
         }
     }
 }
