@@ -16,6 +16,7 @@ fn load_single_http_server_file() {
         bind: "0.0.0.0:0".into(),
         pick: None,
         validate_only: false,
+        watch: false,
     };
     let servers = load_http_servers(&args).expect("load failed");
     assert_eq!(servers.len(), 1);
@@ -32,6 +33,7 @@ fn load_servers_wrapper_and_pick() {
         bind: "0.0.0.0:0".into(),
         pick: Some("second".into()),
         validate_only: false,
+        watch: false,
     };
     let servers = load_http_servers(&args).expect("load failed");
     assert_eq!(servers.len(), 1);
@@ -49,6 +51,7 @@ fn load_plain_array() {
         bind: "0.0.0.0:0".into(),
         pick: None,
         validate_only: false,
+        watch: false,
     };
     let servers = load_http_servers(&args).expect("load failed");
     assert_eq!(servers.len(), 2);
@@ -64,6 +67,7 @@ fn load_service_file_with_bind() {
         bind: "0.0.0.0:8088".into(),
         pick: None,
         validate_only: false,
+        watch: false,
     };
     let servers = load_http_servers(&args).expect("load failed");
     assert_eq!(servers.len(), 1);
@@ -83,6 +87,7 @@ source_dir: /tmp
         bind: "127.0.0.1:12345".into(),
         pick: None,
         validate_only: false,
+        watch: false,
     };
     let servers = load_http_servers(&args).expect("load failed");
     assert_eq!(servers.len(), 1);
